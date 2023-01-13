@@ -40,6 +40,10 @@ type config struct {
 	tlsCertificate        string
 	tlsPrivateKey         string
 	tlsInsecureSkipVerify bool
+	sasl                  bool
+	scramAlgorithmString  string
+	saslUsername          string
+	saslPassword          string
 }
 
 var (
@@ -52,7 +56,7 @@ var (
 	sentCnt uint64
 	errCnt  uint64
 
-	validVersions = []string{
+	validKafkaVersions = []string{
 		"0.8.2.0",
 		"0.8.2.1",
 		"0.8.2.2",
@@ -95,6 +99,10 @@ var (
 		"2.8.1",
 		"3.0.0",
 		"3.1.0"}
+
+	validScramAlgorithms = map[string]bool{
+		"SCRAM-SHA-512": true,
+		"SCRAM-SHA-256": true}
 )
 
 func init() {
@@ -115,6 +123,10 @@ func init() {
 	flag.StringVar(&Config.tlsCertificate, "tls-cert-file", "", "Path to the certificate file")
 	flag.StringVar(&Config.tlsPrivateKey, "tls-key-file", "", "Path to the private key file")
 	flag.BoolVar(&Config.tlsInsecureSkipVerify, "tls-insecure-skip-verify", false, "TLS insecure skip verify")
+	flag.BoolVar(&Config.sasl, "sasl", false, "Whether to enable SASL SCRAM communication")
+	flag.StringVar(&Config.scramAlgorithmString, "scram-algorithm", "", "which algorithm of SASL SCRAM to use, e.g. SCRAM-SHA-512")
+	flag.StringVar(&Config.saslUsername, "username", "", "Username to use when authenticating with SASL SCRAM")
+	flag.StringVar(&Config.saslPassword, "password", "", "Password to use when authenticating with SASL SCRAM")
 	flag.Parse()
 
 	Config.brokers = strings.Split(*brokerString, ",")
@@ -149,11 +161,13 @@ func parseKafkaVersion(kafkaVersion string) sarama.KafkaVersion {
 	version, err := sarama.ParseKafkaVersion(kafkaVersion)
 	if err != nil {
 		fmt.Printf("Invalid API version option: %s\n", Config.kafkaVersionString)
-		fmt.Printf("Options: %+q\n", validVersions)
+		fmt.Printf("Options: %+q\n", validKafkaVersions)
 		os.Exit(1)
 	}
 	return version
 }
+
+// TODO: Handle case where topic doesn't exist on broker.
 
 func main() {
 	if graphiteIp != "" {
@@ -266,6 +280,40 @@ func worker(n int, t *tachymeter.Tachymeter) {
 		conf.Producer.Flush.MaxMessages = Config.batchSize
 		conf.Producer.MaxMessageBytes = Config.msgSize + 50
 		conf.Version = parseKafkaVersion(Config.kafkaVersionString)
+
+		if Config.sasl {
+			log.Println("Sasl SCRAM enbaled!")
+			if !validScramAlgorithms[Config.scramAlgorithmString] {
+				fmt.Printf("Invalid SCRAM algorithm option: %s\n", Config.scramAlgorithmString)
+				fmt.Printf("Options: %+q\n", keysOfMap(validScramAlgorithms))
+				os.Exit(1)
+			}
+			if len(Config.saslUsername) == 0 {
+				fmt.Printf("SASL requires a username!\n")
+				os.Exit(1)
+			}
+			if len(Config.saslPassword) == 0 {
+				fmt.Printf("SASL requires a password!\n")
+				os.Exit(1)
+			}
+			conf.Metadata.Full = true
+			conf.Net.SASL.Enable = true
+			conf.Net.SASL.User = Config.saslUsername
+			conf.Net.SASL.Password = Config.saslPassword
+			conf.Net.SASL.Handshake = true
+			if Config.scramAlgorithmString == "SCRAM-SHA-512" {
+				conf.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient { return &XDGSCRAMClient{HashGeneratorFcn: SHA512} }
+				conf.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
+			} else if Config.scramAlgorithmString == "SCRAM-SHA-256" {
+				conf.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient { return &XDGSCRAMClient{HashGeneratorFcn: SHA256} }
+				conf.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA256
+			}
+			// TLS
+			conf.Net.TLS.Enable = true
+			conf.Net.TLS.Config = &tls.Config{
+				InsecureSkipVerify: true,
+			}
+		}
 
 		if Config.tls {
 
@@ -447,4 +495,14 @@ func calcOutput(t float64, n uint64) (float64, string) {
 
 func round(t time.Duration) time.Duration {
 	return t / 1000 * 1000
+}
+
+func keysOfMap(m map[string]bool) []string {
+	i := 0
+	keys := make([]string, len(m))
+	for k := range m {
+		keys[i] = k
+		i++
+	}
+	return keys
 }
