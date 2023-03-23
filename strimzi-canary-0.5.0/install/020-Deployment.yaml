@@ -1,0 +1,73 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sangrenel
+  labels:
+    app: sangrenel
+spec:
+  template:
+    metadata:
+      labels:
+        app: sangrenel
+    spec:
+      serviceAccountName: sangrenel
+      restartPolicy: Never
+      containers:
+      - name: sangrenel
+        image: localhost:5000/local/test-sangrenel
+        ports:
+        - containerPort: 8080
+          name: metrics
+        command:
+          - "/app/sangrenel"
+          - "-api-version"
+          - "2.3.0"
+          - "-brokers"
+          - "10.110.92.167:9096"
+          - "-topic"
+          - ""
+        # env:
+          ## unauthed
+          # - name: KAFKA_BOOTSTRAP_SERVERS
+          #   value: events-kafka001.drt.ewr.stage.squarespace.net:9092
+          # - name: RECONCILE_INTERVAL_MS
+          #   value: "10000"
+          # - name: TLS_ENABLED
+          #   value: "false"
+          ## Authed
+          # - name: KAFKA_BOOTSTRAP_SERVERS
+          #   value: bootstrap.events-kafka.eqx.dal.stage.squarespace.net:443
+          # - name: RECONCILE_INTERVAL_MS
+          #   value: "10000"
+          # - name: TLS_ENABLED
+          #   value: "true"
+          # - name: TLS_CA_CERT
+          #   valueFrom:
+          #     secretKeyRef:
+          #       name: ca-bundle
+          #       key: pem
+          # - name: TOPIC
+          #   value: ccombs-testing
+        # livenessProbe:
+        #   httpGet:
+        #     path: /liveness
+        #     port: 8080
+        #   initialDelaySeconds: 10
+        #   periodSeconds: 30
+        # readinessProbe:
+        #   httpGet:
+        #     path: /readiness
+        #     port: 8080
+        #   initialDelaySeconds: 10
+        #   periodSeconds: 30    
+        resources:
+          limits:
+            memory: "64Mi"
+            cpu: "100m"
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+        ports:
+          - containerPort: 8080
+            name: metrics
+            protocol: TCP

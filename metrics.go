@@ -5,9 +5,42 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+func recordMetrics() {
+	go func() {
+		for {
+			lastSucceeded.Inc()
+			totalLatency.Inc()
+			time.Sleep(2 * time.Second)
+		}
+	}()
+}
+
+var (
+	lastSucceeded = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "kafka_canary_last_succeeded",
+		Help: "Unix timestamp for last time the kafka canary successfully connected and submitted a message.",
+	})
+
+	totalLatency = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "kafka_canary_e2e_latency",
+		Help: "Time it took to read a produced message by the kafka canary.",
+	})
+)
+
+func promWriter() {
+	recordMetrics()
+	http.Handle("/metrics", promhttp.Handler())
+	http.ListenAndServe(":2112", nil)
+}
 
 var (
 	graphiteIp    string
